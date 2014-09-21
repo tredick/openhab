@@ -113,6 +113,9 @@ public class FritzboxBinding extends
 	/* The IP address to connect to */
 	protected static String ip;
 
+	/* The user of the FritzBox to access via Telnet */
+	protected static String username;	
+	
 	/* The password of the FritzBox to access via Telnet */
 	protected static String password;
 
@@ -129,6 +132,7 @@ public class FritzboxBinding extends
 	public void activate() {
 		super.activate();
 		setProperlyConfigured(true);
+				
 		// if bundle is already configured, launch the monitor thread right away
 		if (ip != null) {
 			reconnect();
@@ -216,6 +220,11 @@ public class FritzboxBinding extends
 			if (StringUtils.isNotBlank(password)) {
 				FritzboxBinding.password = password;
 			}
+			String username = (String) config.get("username");
+			if (StringUtils.isNotBlank(username)) {
+				FritzboxBinding.username = username;
+			}
+			
 		}
 	}
 
@@ -285,7 +294,18 @@ public class FritzboxBinding extends
 				 * could be done via a sperate thread but for just sending one
 				 * command it is not necessary
 				 */
-				receive(client); // password:
+
+				
+				receive(client); // "password: " or ""Fritz!Box user: "
+				
+				// If a username is configured then we assume that the first request was the username and next will ask for password
+				// If no username is configures we assume that the Fritzbox is run in password only mode and so the first request was already the password
+				if ( username != null ) {
+				  logger.debug("Fritzbox authentication user Fritzbox-user '{}'",username);
+				  send(client, username);
+				  receive(client); // password:
+				}
+												
 				send(client, password);
 				receive(client); // welcome text
 				send(client, cmdString);
@@ -578,6 +598,17 @@ public class FritzboxBinding extends
 		try {
 			TelnetClient client = new TelnetClient();
 			client.connect(ip);
+			String response = receive(client);
+			logger.trace("First Response from Fritzbox : {}",response);
+						
+			// If a username is configured then we assume that the first request was the username and next will ask for password
+			// If no username is configures we assume that the Fritzbox is run in password only mode and so the first request was already the password
+			if ( username != null ) {
+			  logger.debug("Fritzbox authentication uses Fritzbox-user '{}'",username);
+			  send(client, username);
+			  
+			  receive(client); // password: 
+			}
 
 			receive(client);
 			send(client, password);
@@ -614,8 +645,13 @@ public class FritzboxBinding extends
 					if (itemType.isAssignableFrom(SwitchItem.class)) {
 						if (answer.equals("1"))
 							state = OnOffType.ON;
-						else
+						else if (answer.equals("0")) 
 							state = OnOffType.OFF;
+						else {
+							state = OnOffType.OFF;
+							logger.error("Couldn't determine item state. Fritzbox responded : '{}'.",answer );
+						}
+																		
 					} else if (itemType.isAssignableFrom(NumberItem.class)) {
 						state = new DecimalType(answer);
 					} else if (itemType.isAssignableFrom(StringItem.class)) {
